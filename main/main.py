@@ -1,0 +1,227 @@
+import numpy as np
+import cupy as cp
+import basis as base
+import grid as grid
+import reference as ref
+import elliptic as ell
+import timestep as ts
+import fluxes as flux
+
+import matplotlib.pyplot as plt
+
+
+print('Beginning program...')
+# Orders
+order = 8  # 9
+time_order = 3
+res_x, res_v = 32, 32  # 256, 256  # 64, 64  # 128, 128
+folder = '..\\data\\'
+filename = 'test'
+
+# Initialize reference normalization parameters
+print('\nBuilding references...')
+triplet = np.array([1.0e21, 1.0e3, 1.0])
+refs = ref.Reference(triplet=triplet, mass_fraction=1836.0)
+
+# Build basis
+print('\nSetting up the basis...')
+orders = np.array([order, order])
+basis = base.Basis2D(orders)
+
+# Initialize grids
+print('\nInitializing grids...')
+k_est = 0.2
+L = 2.0 * np.pi / k_est
+lows = np.array([0, -6*refs.vt_e])
+highs = np.array([L, 6*refs.vt_e])
+resolutions = np.array([res_x, res_v])
+resolutions_ghosts = np.array([res_x+2, res_v+2])
+grids = grid.Grid2D(basis=basis, lows=lows, highs=highs, resolutions=resolutions)
+
+final_time = 10.0  # 30.0  # 3.2
+write_time = 1.0
+
+# Build distribution
+f0 = grid.Distribution(vt=refs.vt_e, resolutions=resolutions, orders=orders)
+f0.initialize_quad_weights(grids)
+f0.initialize(grids)
+# f0.initialize_no_pert(grids)
+f0.arr[0, :, :, :] = f0.arr[-2, :, :, :]
+f0.arr[-1, :, :, :] = f0.arr[1, :, :, :]
+
+df0 = f0.grid_flatten() - f0.flatten_no_pert()
+cbd0 = np.linspace(np.amin(df0), np.amax(df0), num=100)
+
+# print(grids.v.arr_cp[48:52, :])
+# quit()
+
+# Build elliptic operator
+fields = ell.Elliptic(poisson_coefficient=refs.charge_density_multiplier)
+fields.build_central_flux_operator(grid=grids.x, basis=basis.b1)
+fields.invert()
+
+# Build initial field
+n0 = f0.moment_zero()
+f0f = f0.grid_flatten()
+cb0 = np.linspace(np.amin(f0f), np.amax(f0f), num=100)
+x, v = np.meshgrid(grids.x.arr[1:-1, :].flatten(), grids.v.arr[1:-1, :].flatten(), indexing='ij')
+
+charge = cp.mean(n0) - n0
+
+electric_field = fields.poisson(charge_density=charge, grid=grids.x, basis=basis.b1)
+
+plt.figure()
+plt.contourf(x, v, df0, cbd0)
+plt.colorbar()
+plt.xlabel('Position x')
+plt.ylabel('Velocity v')
+plt.title('Initial perturbation')
+plt.tight_layout()
+
+
+plt.figure()
+plt.contourf(x, v, f0f, cb0)
+plt.colorbar()
+plt.xlabel('Position x')
+plt.ylabel('Velocity v')
+plt.title('Initial condition')
+plt.tight_layout()
+plt.show()
+
+print('Initial field max is ' + str(abs(refs.electron_acceleration_multiplier *
+                                        cp.amax(electric_field[1:-1, :]))))
+
+# True field
+true = -refs.charge_density_multiplier * cp.amax(charge) / grids.x.k1 * cp.cos(grids.x.k1 * grids.x.arr_cp)
+true_p = refs.charge_density_multiplier * cp.amax(charge) / (grids.x.k1 ** 2.0) * cp.sin(grids.x.k1 * grids.x.arr_cp)
+
+plt.figure()
+plt.plot(grids.x.arr[1:-1, :].flatten(), charge.get().flatten(), 'o--')
+plt.title('Initial charge density')
+plt.grid(True)
+
+# plt.figure()
+# plt.plot(grids.x.arr[1:-1, :].flatten(), fields.potential.get().flatten(), 'o--')
+# plt.plot(grids.x.arr[1:-1, :].flatten(), true_p[1:-1, :].get().flatten(), 'o--')
+# plt.title('Potential')
+# plt.grid(True)
+
+plt.figure()
+plt.plot(grids.x.arr.flatten(), electric_field.flatten().get(), 'o--', label='apprx')
+plt.plot(grids.x.arr.flatten(), true.flatten().get(), 'o--', label='true')
+plt.grid(True)
+plt.legend(loc='best')
+plt.title('Field')
+plt.show()
+
+# plt.figure()
+# plt.plot(grids.x.arr[1:-1, :].flatten(), (fields.potential - true_p[1:-1, :]).flatten().get(), 'o--')
+# plt.title('Potential error')
+# plt.grid(True)
+#
+# plt.figure()
+# plt.plot(grids.x.arr.flatten(), (electric_field - true).flatten().get(), 'o--')
+# plt.title('Field error')
+# plt.grid(True)
+# plt.show()
+
+# Flux set-up
+print('\nSetting up fluxes...')
+fluxes = flux.DGFlux(resolutions=resolutions_ghosts,
+                     orders=orders,
+                     coefficient=refs.electron_acceleration_multiplier)
+
+# Step now
+stepper = ts.Stepper(time_order=time_order, space_order=orders[0], write_time=write_time, final_time=final_time)
+print('\nBeginning main loop...')
+stepper.main_loop(distribution=f0, basis=basis, elliptic=fields,
+                  grids=grids, dg_flux=fluxes, refs=refs)
+
+print('\nProceeding to post: Plotting now...')
+f0_f = f0.grid_flatten()
+df_f = f0.grid_flatten() - f0.flatten_no_pert()
+cb = np.linspace(np.amin(f0_f), np.amax(f0_f), num=100)
+cbd = np.linspace(np.amin(df_f), np.amax(df_f), num=100)
+
+xt = np.tensordot(np.ones_like(stepper.time_array), grids.x.arr[1:-1, :].flatten(),  axes=0)
+tt = np.tensordot(stepper.time_array, np.ones_like(grids.x.arr[1:-1, :].flatten()), axes=0)
+den_xt = stepper.density.reshape(xt.shape[0], xt.shape[1])
+cb_den = np.linspace(np.amin(den_xt), np.amax(den_xt), num=100)
+
+plt.figure()
+plt.contourf(x, v, f0_f, cb)
+plt.xlabel(r'Position $x$')
+plt.ylabel(r'Velocity $v$')
+plt.colorbar()
+plt.title('Final state')
+plt.tight_layout()
+
+plt.figure()
+plt.contourf(x, v, df_f, cbd)
+plt.xlabel(r'Position $x$')
+plt.ylabel(r'Velocity $v$')
+plt.colorbar()
+plt.title('Difference from equilibrium')
+plt.tight_layout()
+
+plt.figure()
+plt.semilogy(stepper.time_array, stepper.field_energy, 'o--')
+plt.xlabel(r'Simulation time $t$')
+plt.ylabel(r'Field energy')
+# plt.axis([0, stepper.time_array[-1], 0, np.amax(stepper.field_energy)])
+plt.grid(True)
+plt.tight_layout()
+
+plt.figure()
+plt.contourf(xt, tt, den_xt, cb_den)
+plt.xlabel('Space')
+plt.ylabel('Time')
+plt.colorbar()
+plt.tight_layout()
+
+plt.show()
+
+# Bin
+# print(basis.b1.up)
+# print(basis.b1.xi)
+#
+# with open('up8.npy', 'rb') as f:
+#     up8 = np.load(f)
+#
+# with open('xi8.npy', 'rb') as f:
+#     xi8 = np.load(f)
+
+# up_diff = up8 - basis.b1.up.get()
+# xi_diff = xi8 - basis.b1.xi.get()
+
+# print(up_diff)
+# print(xi_diff)
+# quit()
+
+# Reset basis
+# basis.b1.up = cp.asarray(up8)
+# basis.b1.xi = cp.asarray(xi8)
+
+# with open('ic.npy', 'rb') as f:
+#     other_ic = np.load(f)
+#
+# f0f = f0.grid_flatten()
+#
+# diff = f0f - other_ic
+#
+# plt.figure()
+# plt.imshow(diff.T)
+# plt.colorbar()
+# plt.title('IC diff')
+# plt.show()
+# # print('Max f0f is ')
+# # print(np.amax(f0f))
+# plt.figure()
+# # plt.plot(grids.v.arr[1:-1, :].flatten(), f0f[1, :])
+# plt.plot(f0f[1, :])
+# plt.grid(True)
+# plt.show()
+
+# Reset jacobians
+# grids.x.J = 2.8571428571428745
+# grids.v.J = 14.285120394559149
