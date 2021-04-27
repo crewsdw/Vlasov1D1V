@@ -5,13 +5,13 @@ import scipy.special as sp
 import pyvista as pv
 
 # grids
-v = np.linspace(-6, 6, num=600)
+v = np.linspace(-8, 8, num=200)
 vx = np.tensordot(v, np.ones_like(v), axes=0)
 vy = np.tensordot(np.ones_like(v), v, axes=0)
 # complex phase velocity
 z = vx + 1j * vy
 # wave-numbers
-k = np.linspace(1.0e-6, 1, num=300)
+k = np.linspace(1.0e-6, 1, num=100)
 # thermal velocity
 vt = 2.0 ** 0.5
 om_p = 1.0
@@ -26,8 +26,8 @@ grid = pv.StructuredGrid(k3, u3, v3)
 # plasma dispersion functions / parameters
 # gaussian speeds
 vg0 = 0.0
-vg1 = 4.0
-vg2 = -4.0
+vg1 = 6.0
+vg2 = -6.0
 # hilbert transforms
 sqrt_pi = np.pi ** 0.5
 def pd_func(zeta):
@@ -42,21 +42,23 @@ vb2 = (z - vg2) / vt
 
 ### Don't trust fadeeva function
 Z0 = pd_func(vb0)
-# Z1 = pd_func(vb1)
-# Z2 = pd_func(vb2)
-fh = ( (1.0 + vb0 * Z0) ) # + (1.0 + vb1 * Z1) + (1.0 + vb2 * Z2) ) / 3.0
+Z1 = pd_func(vb1)
+Z2 = pd_func(vb2)
+# fh = ( (1.0 + vb0 * Z0) ) # + (1.0 + vb1 * Z1) + (1.0 + vb2 * Z2) ) / 3.0
+fh = 0.5 * ( (1.0 + vb1 * Z1) + (1.0 + vb2 * Z2) )
 
 # dispersion function
-# D = 1.0 + np.tensordot(np.divide(1.0, k ** 2.0), fh, axes=0)
-Dk = 1.0 + fh / (0.2 ** 2.0)
+kx = 0.1
+D = 1.0 + np.tensordot(np.divide(1.0, k ** 2.0), fh, axes=0)
+Dk = 1.0 + fh / (kx ** 2.0)
 
 # distribution
 fp0 = - (v - vg0) / (0.5 * vt ** 2.0) * np.exp(-(v - vg0)**2.0 / vt**2.0) / (vt * sqrt_pi)
 fp1 = - (v - vg1) / (0.5 * vt ** 2.0) * np.exp(-(v - vg1)**2.0 / vt**2.0) / (vt * sqrt_pi)
 fp2 = - (v - vg2) / (0.5 * vt ** 2.0) * np.exp(-(v - vg2)**2.0 / vt**2.0) / (vt * sqrt_pi)
-fp = fp0 # (fp0 + fp1 + fp2) / 3.0
+# fp = (fp0 + fp1 + fp2) / 3.0
+fp = 0.5 * (fp1 + fp2)
 
-kx = 0.2
 L = 2.0 * np.pi / kx
 x = np.linspace(0, L, num=100)
 

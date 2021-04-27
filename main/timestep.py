@@ -51,7 +51,7 @@ class Stepper:
         # quit()
 
         # Simulation time init
-        self.time = cp.asarray(0.0)
+        self.time = 0.0  # cp.asarray(0.0)
         self.dt = None
         self.steps_counter = 0
         self.write_counter = 1  # IC already written
@@ -73,25 +73,25 @@ class Stepper:
     def get_courant_number(self):
         return courant_numbers.get(self.time_order)[self.space_order - 1]
 
-    def main_loop(self, distribution, basis, elliptic, grids, dg_flux, refs):
-        # x, v = np.meshgrid(grids.x.arr[1:-1, :].flatten(), grids.v.arr[1:-1, :].flatten(), indexing='ij')
-        # xg, vg = np.meshgrid(grids.x.arr.flatten(), grids.v.arr.flatten(), indexing='ij')
+    def main_loop(self, distribution, basis, elliptic, grids, dg_flux, refs, save_file):
         print('Courant number is ' + str(self.courant))
         # Loop while time is less than final time
         t0 = timer.time()
         # Initial field energy
         density = cp.tensordot(distribution.arr[1:-1, :, 1:-1, :],
-                               grids.v.quad_weights, axes=([2, 3], [0, 1])) / grids.v.J  # [0, 1], [0, 1]
+                               grids.v.quad_weights, axes=([2, 3], [0, 1])) / grids.v.J
         charge_initial = cp.mean(density) - density
-        electric_field_initial = elliptic.poisson(charge_density=charge_initial, grid=grids.x, basis=basis.b1)
+        # electric_field_initial = elliptic.poisson(charge_density=charge_initial, grid=grids.x, basis=basis.b1)
+        electric_field_initial = elliptic.poisson2(charge_density=charge_initial, grid=grids.x)
+        #
         self.density = np.array([density.get()])
         self.field_energy = np.array([elliptic.electric_energy(grid=grids.x, field=electric_field_initial).get()])
-        self.time_array = np.array([self.time.get()])
+        self.time_array = np.array([self.time])  # .get()])
         # initial dt set
         max_speeds = [grids.v.arr_max, abs(refs.electron_acceleration_multiplier) *
-                      cp.amax(cp.absolute(electric_field_initial[1:-1, :]))]
+                      cp.amax(cp.absolute(electric_field_initial[1:-1, :])).get()]
         self.dt = self.adapt_time_step(max_speeds=max_speeds, dx=grids.x.dx, dv=grids.v.dx)
-        # Copies for debug
+        # Copies of IC
         initial_condition_copy = copy.deepcopy(distribution.arr)
         # initial_condition = distribution.flatten_no_pert()  # distribution.grid_flatten()
         while self.time < self.final_time:
@@ -107,72 +107,32 @@ class Stepper:
             # distribution_next, electric_field, density = self.ssp_rk_update(func=distribution, basis=basis,
             #                                                                 elliptic=elliptic,
             #                                                                 grids=grids, dg_flux=dg_flux, refs=refs)
+            # Reset array
+            distribution.arr[grids.no_ghost_slice] = distribution_next[grids.no_ghost_slice]
             # Get time and energy
             self.steps_counter += 1
             self.time += self.dt
-            self.time_array = np.append(self.time_array, self.time.get())
-            self.field_energy = np.append(self.field_energy,
-                                          elliptic.electric_energy(field=electric_field, grid=grids.x).get())
-            self.density = np.append(self.density, density.get())
-            # Print
+            self.time_array = np.append(self.time_array, self.time)  # .get())
+            energy = elliptic.electric_energy(field=electric_field, grid=grids.x).get()
+            density = (cp.tensordot(distribution.arr[1:-1, :, 1:-1, :],
+                               grids.v.quad_weights, axes=([2, 3], [0, 1])) / grids.v.J).get()
+            self.field_energy = np.append(self.field_energy, energy)
+            self.density = np.append(self.density, density)
+            # Write-out at specified times
             if self.time > self.write_counter * self.write_time:
+                print('\nI made it through step ' + str(self.steps_counter))
                 self.write_counter += 1
-                print('\nMade it through step ' + str(self.steps_counter))
-                print('The simulation time is {:0.3e}'.format(self.time.get()))
-                print('The time-step is {:0.3e}'.format(self.dt.get()))
-                print('Time since start is ' + str((timer.time() - t0) / 60.0) + ' minutes')
-            # if self.steps_counter == 10000:
-            #     print('\nAll done!')
-            #     print('Made it through step ' + str(self.steps_counter))
-            #     print('The simulation time is {:0.3e}'.format(self.time.get()))
-            #     print('The time-step is {:0.3e}'.format(self.dt.get()))
-            #     print('Time since start is ' + str((timer.time() - t0) / 60.0) + ' minutes')
-            #     # Examine
-            #     df_dt = dg_flux.semi_discrete_rhs(function=cp.ascontiguousarray(distribution.arr, dtype=cp.float64),
-            #                                       field=electric_field, basis=basis,
-            #                                       grids=grids, debug=False)[grids.no_ghost_slice]
-            #     df_dt_f = df_dt.reshape(grids.x.res * grids.x.order, grids.v.res * grids.v.order).get()
-            #     cb = np.linspace(np.amin(df_dt_f), np.amax(df_dt_f), num=100)
-            #     dn_f = distribution_next[grids.no_ghost_slice].reshape(grids.x.res * grids.x.order,
-            #                                                            grids.v.res * grids.v.order).get()
-            #     df = dn_f - initial_condition
-            #     cbn = np.linspace(np.amin(dn_f), np.amax(dn_f), num=100)
-            #     cbd = np.linspace(np.amin(df), np.amax(df), num=100)
-            #     print(cbd[0])
-            #     print(cbd[-1])
-            #     # Visualize
-            #     plt.figure()
-            #     plt.plot(time_array, field_energy, 'o--')
-            #     plt.grid(True)
-            #     plt.xlabel(r'Time $t$')
-            #     plt.ylabel('Field energy')
-            #
-            #     plt.figure()
-            #     plt.contourf(x, v, df_dt_f, cb)
-            #     plt.title('RHS for step i')
-            #     plt.figure()
-            #     plt.imshow(df_dt_f.T)
-            #     plt.colorbar()
-            #     plt.title('Pixel-view of df_dt_f')
-            #     plt.figure()
-            #     plt.contourf(x, v, dn_f, cbn)
-            #     plt.title('Function after step i')
-            #     plt.colorbar()
-            #     plt.figure()
-            #     plt.contourf(x, v, df, cbd)
-            #     plt.title('Difference from IC')
-            #     plt.colorbar()
-            #
-            #     f0f = distribution.grid_flatten()
-            #     cb = np.linspace(np.amin(f0f), np.amax(f0f), num=100)
-            #     x, v = np.meshgrid(grids.x.arr[1:-1, :].flatten(), grids.v.arr[1:-1, :].flatten(), indexing='ij')
-            #     plt.figure()
-            #     plt.contourf(x, v, f0f, cb)
-            #     plt.title('Flat dist.')
-            #     plt.show()
-            # Reset array
-            # distribution_next[distribution_next < 0] = 1.0e-15
-            distribution.arr[grids.no_ghost_slice] = distribution_next[grids.no_ghost_slice]  # deepcopy
+                print('Saving data...')
+                save_file.save_data(distribution=distribution.arr.get(),
+                                    elliptic=elliptic,
+                                    density=density,
+                                    time=self.time,
+                                    field_energy=energy)
+                print('Done.')
+                print('The simulation time is {:0.3e}'.format(self.time))
+                print('The time-step is {:0.3e}'.format(self.dt))
+                print('Time since start is %.3f' % ((timer.time() - t0) / 60.0) + ' minutes')
+
         # Loop finished
         print('\nDone...!')
 
@@ -185,7 +145,8 @@ class Stepper:
                                grids.v.quad_weights, axes=([2, 3], [0, 1])) / grids.v.J
         charge = cp.mean(density) - density
         # Electric field
-        field = elliptic.poisson(charge_density=charge, grid=grids.x, basis=basis.b1)
+        # field = elliptic.poisson(charge_density=charge, grid=grids.x, basis=basis.b1)
+        field = elliptic.poisson2(charge_density=charge, grid=grids.x)
         # Forward euler advance
         df_dt = dg_flux.semi_discrete_rhs(function=func.arr,
                                           field=field, basis=basis, grids=grids)
@@ -204,7 +165,8 @@ class Stepper:
                                    grids.v.quad_weights, axes=([2, 3], [0, 1])) / grids.v.J
             charge = cp.mean(density) - density
             # Electric field
-            field = elliptic.poisson(charge_density=charge, grid=grids.x, basis=basis.b1)
+            # field = elliptic.poisson(charge_density=charge, grid=grids.x, basis=basis.b1)
+            field = elliptic.poisson2(charge_density=charge, grid=grids.x)
             # RK stage advance
             df_dt = dg_flux.semi_discrete_rhs(function=arr_stage[i - 1, :, :, :, :],
                                               field=field, basis=basis, grids=grids)
@@ -213,6 +175,10 @@ class Stepper:
             arr_stage[g_idx_i] = (self.coefficients[i - 1, 0] * func.arr[grids.no_ghost_slice] +
                                   self.coefficients[i - 1, 1] * arr_stage[g_idx_i1] +
                                   self.coefficients[i - 1, 2] * self.dt * df_dt[grids.no_ghost_slice])
+        # Update dt
+        max_speeds = [grids.v.arr_max, abs(refs.electron_acceleration_multiplier) *
+                      cp.amax(cp.absolute(field[1:-1, :])).get()]
+        self.dt = self.adapt_time_step(max_speeds=max_speeds, dx=grids.x.dx, dv=grids.v.dx)
         # Return result
         return arr_stage[-1, :, :, :, :], field, density
 
@@ -258,7 +224,7 @@ class Stepper:
         arr_next[grids.no_ghost_slice] += self.coefficients[-1] * self.dt * df_dt[grids.no_ghost_slice]
         # Update dt
         max_speeds = [grids.v.arr_max, abs(refs.electron_acceleration_multiplier) *
-                      cp.amax(cp.absolute(field[1:-1, :]))]
+                      cp.amax(cp.absolute(field[1:-1, :])).get()]
         self.dt = self.adapt_time_step(max_speeds=max_speeds, dx=grids.x.dx, dv=grids.v.dx)
         return arr_next, field, density
 
@@ -446,3 +412,53 @@ class Stepper:
 # plt.imshow(step_f.T)
 # plt.colorbar()
 # plt.show()
+
+# if self.steps_counter == 10000:
+#     print('\nAll done!')
+#     print('Made it through step ' + str(self.steps_counter))
+#     print('The simulation time is {:0.3e}'.format(self.time.get()))
+#     print('The time-step is {:0.3e}'.format(self.dt.get()))
+#     print('Time since start is ' + str((timer.time() - t0) / 60.0) + ' minutes')
+#     # Examine
+#     df_dt = dg_flux.semi_discrete_rhs(function=cp.ascontiguousarray(distribution.arr, dtype=cp.float64),
+#                                       field=electric_field, basis=basis,
+#                                       grids=grids, debug=False)[grids.no_ghost_slice]
+#     df_dt_f = df_dt.reshape(grids.x.res * grids.x.order, grids.v.res * grids.v.order).get()
+#     cb = np.linspace(np.amin(df_dt_f), np.amax(df_dt_f), num=100)
+#     dn_f = distribution_next[grids.no_ghost_slice].reshape(grids.x.res * grids.x.order,
+#                                                            grids.v.res * grids.v.order).get()
+#     df = dn_f - initial_condition
+#     cbn = np.linspace(np.amin(dn_f), np.amax(dn_f), num=100)
+#     cbd = np.linspace(np.amin(df), np.amax(df), num=100)
+#     print(cbd[0])
+#     print(cbd[-1])
+#     # Visualize
+#     plt.figure()
+#     plt.plot(time_array, field_energy, 'o--')
+#     plt.grid(True)
+#     plt.xlabel(r'Time $t$')
+#     plt.ylabel('Field energy')
+#
+#     plt.figure()
+#     plt.contourf(x, v, df_dt_f, cb)
+#     plt.title('RHS for step i')
+#     plt.figure()
+#     plt.imshow(df_dt_f.T)
+#     plt.colorbar()
+#     plt.title('Pixel-view of df_dt_f')
+#     plt.figure()
+#     plt.contourf(x, v, dn_f, cbn)
+#     plt.title('Function after step i')
+#     plt.colorbar()
+#     plt.figure()
+#     plt.contourf(x, v, df, cbd)
+#     plt.title('Difference from IC')
+#     plt.colorbar()
+#
+#     f0f = distribution.grid_flatten()
+#     cb = np.linspace(np.amin(f0f), np.amax(f0f), num=100)
+#     x, v = np.meshgrid(grids.x.arr[1:-1, :].flatten(), grids.v.arr[1:-1, :].flatten(), indexing='ij')
+#     plt.figure()
+#     plt.contourf(x, v, f0f, cb)
+#     plt.title('Flat dist.')
+#     plt.show()

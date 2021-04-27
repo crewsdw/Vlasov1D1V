@@ -79,7 +79,6 @@ class Elliptic:
 
     def invert(self):
         self.inv_op = cp.asarray(np.linalg.inv(self.central_flux_operator))
-        # self.inv_op = np.linalg.inv(self.central_flux_operator)
 
     def poisson(self, charge_density, grid, basis):
         """
@@ -88,7 +87,7 @@ class Elliptic:
         # Preprocess (last entry is average value)
         rhs = cp.zeros((grid.res * grid.order + 1))
         rhs[:-1] = cp.tensordot(self.poisson_coefficient * charge_density, basis.d_mass, axes=([1], [1])).flatten()
-        # print(self.poisson_coefficient)
+
         # Compute solution and remove last entry
         sol = cp.matmul(self.inv_op, rhs)[:-1] / (grid.J ** 2.0)
         self.potential = sol.reshape(grid.res, grid.order)
@@ -98,23 +97,9 @@ class Elliptic:
         self.potential = grid.sum_fourier(coefficients)
 
         # Compute gradient
-        # self.electric_field = cp.zeros_like(grid.arr_cp)
         electric_field = cp.zeros_like(grid.arr_cp)
-        # print(self.gradient_operator.shape)
-        # print(self.potential.shape)
-        # quit()
-        # self.electric_field[1:-1, :] = (grid.J *
-        #                                 cp.tensordot(self.gradient_operator, self.potential, axes=([0, 1], [0, 1])))
         electric_field[1:-1, :] = -(grid.J *
                                    cp.tensordot(self.gradient_operator, self.potential, axes=([0, 1], [0, 1])))
-
-        # Clean solution (anti-alias)
-        # coefficients = grid.fourier_basis(self.electric_field[1:-1, :])
-        # self.electric_field[1:-1, :] = grid.sum_fourier(coefficients)
-        #
-        # # Set ghost cells
-        # self.electric_field[0, :] = self.electric_field[-2, :]
-        # self.electric_field[-1, :] = self.electric_field[1, :]
 
         # Anti-alias
         coefficients = grid.fourier_basis(electric_field[1:-1, :])
@@ -125,6 +110,36 @@ class Elliptic:
         electric_field[-1, :] = electric_field[1, :]
 
         # Return field
+        return electric_field
+
+    def poisson2(self, charge_density, grid):
+        """ Alternative Poisson solve using Fourier spectral basis """
+        # Pre-process charge density
+        rhs = self.poisson_coefficient * charge_density
+        # Get Fourier spectral basis
+        rhs_coefficients = grid.fourier_basis(rhs)
+        # Compute spectral solution coefficients
+        field_coefficients = -cp.divide(rhs_coefficients, (1j * grid.d_wave_numbers))
+        potential_coefficients = -cp.divide(rhs_coefficients, grid.d_wave_numbers ** 2.0)
+        # Clear "inf"
+        field_coefficients = cp.nan_to_num(field_coefficients)
+        potential_coefficients = cp.nan_to_num(potential_coefficients)
+
+        # Compute field and potential as inverse fourier transform
+        electric_field = cp.zeros_like(grid.arr_cp)
+        electric_field[1:-1, :] = grid.sum_fourier(field_coefficients)
+        self.potential = grid.sum_fourier(potential_coefficients)
+
+        # Debug
+        # print(field_coefficients)
+        # print(self.electric_field[2, :])
+        # plt.figure()
+        # plt.plot(grid.arr.flatten(), self.electric_field.flatten().get(), 'o--')
+        # plt.show()
+
+        # Set ghost cells
+        electric_field[0, :] = electric_field[-2, :]
+        electric_field[-1, :] = electric_field[1, :]
         return electric_field
 
     def set_magnetic_field(self, magnetic_field):

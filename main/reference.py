@@ -1,5 +1,5 @@
 import numpy as np
-# import datetime
+import datetime
 
 # Physical Constants
 me = 9.10938188e-31  # electron mass [kg]
@@ -55,6 +55,85 @@ class Reference:
         self.ion_acceleration_multiplier = (self.zi / self.ai) * (self.length / self.dp)
         self.charge_density_multiplier = -self.omp_p_tau ** 2.0 * (self.dp / self.length)
 
-        print(self.electron_acceleration_multiplier)
-        print(self.ion_acceleration_multiplier)
-        print(self.charge_density_multiplier)
+        # print(self.electron_acceleration_multiplier)
+        # print(self.ion_acceleration_multiplier)
+        # print(self.charge_density_multiplier)
+
+    # Create run file
+    def info_file(self, info_name, geometry_info, time_info):
+        # Unpack geometry info: space
+        x_min = geometry_info[0, 0]
+        x_max = geometry_info[0, 1]
+        resolution_x = geometry_info[0, 2]
+        order_x = geometry_info[0, 3]
+        # Unpack geometry info: velocity u
+        u_min = geometry_info[1, 0]
+        u_max = geometry_info[1, 1]
+        resolution_u = geometry_info[1, 2]
+        order_u = geometry_info[1, 3]
+        # Unpack geometry info: velocity v
+        # v_min = geometry_info[2, 0]
+        # v_max = geometry_info[2, 1]
+        # resolution_v = geometry_info[2, 2]
+        # order_v = geometry_info[2, 3]
+
+        # Unpack time info
+        final_time = time_info[0]
+        write_time = time_info[1]
+        courant_number = time_info[2]
+        order_t = time_info[3]
+
+        # Create run parameters file
+        write_file = open(info_name, 'w')
+        write_file.write('######################################')
+        write_file.write('\n### V-high-order Run File ############')
+        write_file.write('\n######################################')
+        write_file.write('\nRun performed ' + datetime.datetime.today().strftime('%Y-%m-%d'))
+        write_file.write('\n\nBasis Triplet:')
+        write_file.write('\nRef density:                           ' + "{:.2E}".format(self.n) + ' [m^-3]')
+        write_file.write('\nRef temperature:                       ' + "{:.2E}".format(self.T) + ' [eV]')
+        write_file.write('\nRef length (Debye):                    ' + "{:.2E}".format(self.length) + ' [m]')
+        write_file.write('\n\nValues Inferred from Triplet:')
+        write_file.write('\nRef velocity:                          ' + "{:.2E}".format(self.v) + ' [m/s]')
+        write_file.write('\nRef time:                              ' + "{:.2E}".format(self.tau) + ' [s]')
+        write_file.write('\nRef proton plasma frequency:           ' +
+                         "{:.2E}".format(self.omp_p_tau / self.tau) + ' [Hz]')
+        write_file.write('\nRef electron plasma frequency:         ' +
+                         "{:.2E}".format(self.omp_e_tau / self.tau) + ' [Hz]')
+        write_file.write('\nRef proton thermal velocity:           ' + "{:.2E}".format(self.v) + ' [m/s]')
+        write_file.write('\nRef proton skin depth:                 ' + "{:.2E}".format(self.dp) + ' [m]')
+        write_file.write('\n\nNormalized Run Values (Dimensionless):')
+        write_file.write('\nRun density                            ' + "{:.2f}".format(self.n / self.n))
+        write_file.write('\nRun omptau                             ' + "{:.2f}".format(self.omp_p_tau))
+        write_file.write('\nRun proton thermal velocity            ' + "{:.2f}".format(self.vt_i))
+        write_file.write('\nRun proton temperature                 ' + "{:.2f}".format(self.Ti / self.T))
+        write_file.write('\nRun electron-ion temperature ratio     ' + "{:.2f}".format(self.TeTi))
+        write_file.write('\nRun ometau                             ' + "{:.2f}".format(self.omp_e_tau))
+        write_file.write('\nRun electron thermal velocity          ' + "{:.2f}".format(self.vt_e))
+        write_file.write('\nRun electron temperature               ' + "{:.2f}".format(self.Te / self.T))
+        write_file.write('\nRun Debye length                       ' + "{:.2f}".format(self.Ld))
+        write_file.write('\nRun skin depth                         ' + "{:.2f}".format(self.dp / self.length))
+        write_file.write('\nElectron acceleration coefficient      ' +
+                         "{:.2E}".format(self.electron_acceleration_multiplier))
+        write_file.write('\nProton acceleration coefficient        ' +
+                         "{:.2E}".format(self.ion_acceleration_multiplier))
+        write_file.write(
+            '\nPoisson equation coefficient           ' + "{:.2E}".format(self.charge_density_multiplier))
+        write_file.write('\n\nGrid and time-stepping parameters')
+        write_file.write('\nX elements:                    ' + str(resolution_x))
+        write_file.write('\nU elements:                    ' + str(resolution_u))
+        # write_file.write('\nV elements:                    ' + str(resolution_v))
+        write_file.write('\nX domain minimum:              ' + "{:.2E}".format(x_min))
+        write_file.write('\nX domain maximum:              ' + "{:.2E}".format(x_max))
+        write_file.write('\nElectron u-velocity minimum    ' + "{:.2E}".format(u_min))
+        write_file.write('\nElectron u-velocity maximum    ' + "{:.2E}".format(u_max))
+        # write_file.write('\nElectron v-velocity minimum    ' + "{:.2E}".format(v_min))
+        # write_file.write('\nElectron v-velocity maximum    ' + "{:.2E}".format(v_max))
+        write_file.write('\nTime to run:                   ' + "{:.2f}".format(final_time))
+        write_file.write('\nTime per data write-out         ' + "{:.2f}".format(write_time))
+        write_file.write('\nCFL number:                    ' + "{:.2f}".format(courant_number))
+        write_file.write('\nSpatial element order:         ' + str(order_x))
+        write_file.write('\nVelocity-u element order:      ' + str(order_u))
+        # write_file.write('\nVelocity-v element order:      ' + str(order_v))
+        write_file.write('\nTemporal stepping order:       ' + str(order_t))
+        write_file.close()
