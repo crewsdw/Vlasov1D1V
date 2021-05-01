@@ -15,7 +15,7 @@ print('Beginning program...')
 # Orders
 order = 9  # 9
 time_order = 3  # Currently hard-coded for third-order
-res_x, res_v = 64, 64  # 256, 256  # 64, 64  # 128, 128
+res_x, res_v = 128, 128  # 256, 256  # 64, 64  # 128, 128
 folder = '..\\data\\'
 filename = 'test'
 
@@ -48,8 +48,8 @@ geo_info = np.array([[lows[0], highs[0], resolutions[0], orders[0]],
                      [lows[1], highs[1], resolutions[1], orders[1]]])
 
 # Time parameters
-final_time = 30.0  # 30.0  # 3.2
-write_time = 0.1
+final_time = 50.0  # 30.0  # 3.2
+write_time = 0.5
 
 # Build distribution
 print('\nInitializing distribution function...')
